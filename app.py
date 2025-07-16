@@ -9,7 +9,7 @@ import torch
 import time
 
 # Download NLTK data
-nltk.download('punkt', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 
 # Streamlit page configuration
 st.set_page_config(page_title="News Summarizer", page_icon="📰", layout="wide")
