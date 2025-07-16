@@ -7,24 +7,16 @@ from nltk.tokenize import word_tokenize, sent_tokenize
 from transformers import BartForConditionalGeneration, BartTokenizer
 import torch
 import os
-import logging
-
-# Set up logging for debugging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Pre-download NLTK punkt resource
 @st.cache_resource
 def ensure_nltk_punkt():
     try:
         nltk.data.find('tokenizers/punkt')
-        logger.info("NLTK punkt resource found.")
     except LookupError:
-        logger.info("Downloading NLTK punkt_tab to /tmp/nltk_data...")
         os.makedirs('/tmp/nltk_data', exist_ok=True)
         nltk.download('punkt_tab', download_dir='/tmp/nltk_data', quiet=True)
         os.environ['NLTK_DATA'] = '/tmp/nltk_data'
-        logger.info("NLTK punkt_tab downloaded successfully.")
     return True
 
 ensure_nltk_punkt()
@@ -32,23 +24,15 @@ ensure_nltk_punkt()
 # Streamlit page configuration
 st.set_page_config(page_title="News Summarizer", page_icon="📰", layout="wide")
 
-# Load BART model and tokenizer globally
+# Load lightweight BART model globally
 @st.cache_resource
 def load_bart_model():
-    try:
-        model_name = "facebook/bart-large-cnn"
-        logger.info(f"Loading BART model: {model_name}")
-        tokenizer = BartTokenizer.from_pretrained(model_name)
-        model = BartForConditionalGeneration.from_pretrained(model_name)
-        if torch.cuda.is_available():
-            model = model.to("cuda")
-            logger.info("BART model moved to GPU.")
-        else:
-            logger.info("Running BART model on CPU.")
-        return tokenizer, model
-    except Exception as e:
-        logger.error(f"Error loading BART model: {str(e)}")
-        raise
+    model_name = "sshleifer/distilbart-cnn-6-6"  # Lightweight model
+    tokenizer = BartTokenizer.from_pretrained(model_name)
+    model = BartForConditionalGeneration.from_pretrained(model_name)
+    if torch.cuda.is_available():
+        model = model.to("cuda")
+    return tokenizer, model
 
 try:
     tokenizer, model = load_bart_model()
@@ -67,10 +51,8 @@ def extract_article_text(url):
         paragraphs = soup.find_all('p')
         article_text = ' '.join([p.get_text() for p in paragraphs])
         article_text = ' '.join(article_text.split())
-        logger.info(f"Extracted article from {url}")
         return article_text if article_text else "Error: No content found."
     except Exception as e:
-        logger.error(f"Error fetching article: {str(e)}")
         return f"Error fetching article: {str(e)}"
 
 # Preprocess text (keep numbers, punctuation)
@@ -78,14 +60,12 @@ def preprocess_text(text):
     text = re.sub(r'[^\w\s\.,:;/-]', '', text)
     tokens = word_tokenize(text.lower())
     clean_text = ' '.join(tokens)
-    logger.info("Text preprocessed successfully.")
-    return ' '.join(clean_text.split()[:512])
+    return ' '.join(clean_text.split()[:256])  # Reduced for memory
 
 # Improve final summary quality
 def post_process_summary(summary, target_length):
     sentences = sent_tokenize(summary)
     if not sentences:
-        logger.warning("No sentences found in summary.")
         return summary[:target_length]
 
     key_details = [s for s in sentences if re.search(r'\b\d{4}\b|olympics|venue|schedule|date|global|impact|format', s, re.IGNORECASE)]
@@ -106,13 +86,12 @@ def post_process_summary(summary, target_length):
         if last_dot != -1:
             summary = summary[:last_dot + 1]
     elif len(summary.split()) < target_length * 0.9:
-        summary = ' '.join(sentences)  # Fallback to full summary if too short
+        summary = ' '.join(sentences)  # Fallback to full summary
 
     # Polish text
     summary = re.sub(r'\s+', ' ', summary).strip()
     summary = re.sub(r'\bolympics\b', 'the Olympics', summary, flags=re.IGNORECASE)
     summary = re.sub(r'\bt tournaments\b', 'T20 tournaments', summary, flags=re.IGNORECASE)
-    logger.info("Summary post-processed successfully.")
     return summary[0].upper() + summary[1:] if summary else ""
 
 # Generate summary using BART
@@ -124,15 +103,13 @@ def summarize_text(text, max_length, _tokenizer, _model):
         
         # Tokenize input
         status_text.text("Tokenizing input...")
-        logger.info("Tokenizing input text...")
-        inputs = _tokenizer(text, max_length=512, return_tensors="pt", truncation=True)
+        inputs = _tokenizer(text, max_length=256, return_tensors="pt", truncation=True)
         if torch.cuda.is_available():
             inputs = {k: v.to("cuda") for k, v in inputs.items()}
         progress_bar.progress(70)
 
         # Generate summary
         status_text.text("Processing with BART...")
-        logger.info("Generating summary with BART...")
         with torch.no_grad():
             summary_ids = _model.generate(
                 inputs['input_ids'],
@@ -146,15 +123,12 @@ def summarize_text(text, max_length, _tokenizer, _model):
         
         # Decode and post-process
         status_text.text("Finalizing output...")
-        logger.info("Decoding and post-processing summary...")
         summary = _tokenizer.decode(summary_ids[0], skip_special_tokens=True)
         summary = post_process_summary(summary, max_length)
         progress_bar.progress(100)
         status_text.text("Summarization complete!")
-        logger.info("Summarization completed successfully.")
         return summary
     except Exception as e:
-        logger.error(f"Error during summarization: {str(e)}")
         return f"Error during summarization: {str(e)}"
     finally:
         progress_bar.empty()
@@ -164,8 +138,7 @@ def summarize_text(text, max_length, _tokenizer, _model):
 def main():
     st.title("📰 News Article Summarizer")
     st.write("Enter a news article URL and get a clear, concise summary.")
-    if not torch.cuda.is_available():
-        st.info("Note: Using a GPU can significantly speed up summarization.")
+    st.info("Streamlit Cloud allocates 2.7 GB per app. For faster performance, use a GPU-enabled environment.")
 
     with st.container():
         col1, col2 = st.columns([3, 1])
