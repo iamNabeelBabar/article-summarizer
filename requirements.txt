@@ -1,6 +1,6 @@
-streamlit==1.27.2
-requests==2.31.0
-beautifulsoup4==4.12.2
-nltk==3.8.1
-transformers==4.36.2
-torch==2.7.1
+streamlit
+requests
+beautifulsoup4
+nltk
+transformers
+torch
