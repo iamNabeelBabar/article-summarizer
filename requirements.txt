@@ -1,6 +1,20 @@
+# Streamlit Web App
 streamlit==1.39.0
+
+# HTTP Requests
 requests==2.32.3
+
+# HTML Parsing
 beautifulsoup4==4.12.3
-nltk==3.9.1
+
+# Natural Language Toolkit (Tokenizer, Sentence Splitting)
+nltk==3.8.1
+
+# Hugging Face Transformers for Summarization
 transformers==4.44.2
+
+# PyTorch (Backend for Transformers)
 torch==2.4.1
+
+# Tokenizer Dependency (used by some transformer models like BART)
+sentencepiece==0.2.0
