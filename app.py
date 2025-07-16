@@ -12,7 +12,7 @@ from transformers import BartForConditionalGeneration, BartTokenizer
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
-    nltk.download('punkt_tab')
+    nltk.download('punkt')
 
 # ✅ Streamlit page config
 st.set_page_config(page_title="News Summarizer", page_icon="📰", layout="wide")
