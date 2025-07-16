@@ -12,7 +12,7 @@ import time
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
-    nltk.download('punkt')
+    nltk.download('punkt_tab')
 
 # ✅ Streamlit page config
 st.set_page_config(page_title="News Summarizer", page_icon="📰", layout="wide")
