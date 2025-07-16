@@ -3,10 +3,10 @@ import requests
 from bs4 import BeautifulSoup
 import nltk
 import re
-import time
-import torch
 from nltk.tokenize import word_tokenize, sent_tokenize
 from transformers import BartForConditionalGeneration, BartTokenizer
+import torch
+import time
 
 # ✅ Download NLTK resources safely
 try:
