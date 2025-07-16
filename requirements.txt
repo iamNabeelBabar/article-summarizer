@@ -1,7 +1,6 @@
-streamlit==1.39.0
-requests==2.32.3
-beautifulsoup4==4.12.3
+streamlit==1.46.1
+beautifulsoup4==4.13.4
+requests==2.32.4
 nltk==3.9.1
-transformers==4.36.2  # ✅ Safe version that doesn’t require Rust
-torch==2.7.1
-
+transformers==4.36.2
+torch==2.2.2
