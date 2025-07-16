@@ -6,178 +6,163 @@ import re
 from nltk.tokenize import word_tokenize, sent_tokenize
 from transformers import BartForConditionalGeneration, BartTokenizer
 import torch
-import os
+import time
 
-# Pre-download NLTK punkt resource
-@st.cache_resource
-def ensure_nltk_punkt():
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        os.makedirs('/tmp/nltk_data', exist_ok=True)
-        nltk.download('punkt_tab', download_dir='/tmp/nltk_data', quiet=True)
-        os.environ['NLTK_DATA'] = '/tmp/nltk_data'
-    return True
-
-ensure_nltk_punkt()
+# Download NLTK data
+nltk.download('punkt', quiet=True)
 
 # Streamlit page configuration
 st.set_page_config(page_title="News Summarizer", page_icon="📰", layout="wide")
 
-# Load lightweight BART model globally
-@st.cache_resource
-def load_bart_model():
-    model_name = "sshleifer/distilbart-cnn-6-6"  # Lightweight model
-    tokenizer = BartTokenizer.from_pretrained(model_name)
-    model = BartForConditionalGeneration.from_pretrained(model_name)
-    if torch.cuda.is_available():
-        model = model.to("cuda")
-    return tokenizer, model
-
-try:
-    tokenizer, model = load_bart_model()
-except Exception as e:
-    st.error(f"Failed to load BART model: {str(e)}")
-    st.stop()
-
-# Extract article content from a URL
-@st.cache_data
+# Function to extract article text from a URL
 def extract_article_text(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
+
         soup = BeautifulSoup(response.text, 'html.parser')
         paragraphs = soup.find_all('p')
-        article_text = ' '.join([p.get_text() for p in paragraphs])
+        article_text = ' '.join([para.get_text() for para in paragraphs])
+
         article_text = ' '.join(article_text.split())
-        return article_text if article_text else "Error: No content found."
+        if not article_text:
+            return "Error: No content found in the article."
+        return article_text
     except Exception as e:
         return f"Error fetching article: {str(e)}"
 
-# Preprocess text (keep numbers, punctuation)
+# ✅ Updated function to preprocess text (keeps numbers and punctuation)
 def preprocess_text(text):
+    # Keep letters, numbers, and punctuation
     text = re.sub(r'[^\w\s\.,:;/-]', '', text)
-    tokens = word_tokenize(text.lower())
-    clean_text = ' '.join(tokens)
-    return ' '.join(clean_text.split()[:256])  # Reduced for memory
 
-# Improve final summary quality
+    # Tokenize
+    tokens = word_tokenize(text.lower())
+
+    # Rejoin and limit
+    clean_text = ' '.join(tokens)
+    max_length = 1024
+    clean_text = ' '.join(clean_text.split()[:max_length])
+    return clean_text
+
+# Function to post-process summary for clarity and completeness
 def post_process_summary(summary, target_length):
     sentences = sent_tokenize(summary)
     if not sentences:
         return summary[:target_length]
 
-    key_details = [s for s in sentences if re.search(r'\b\d{4}\b|olympics|venue|schedule|date|global|impact|format', s, re.IGNORECASE)]
-    current_words, selected = 0, []
+    key_details = []
+    for sentence in sentences:
+        if re.search(r'\b\d{4}\b|olympics|venue|schedule|date', sentence, re.IGNORECASE):
+            key_details.append(sentence)
 
-    for s in key_details + sentences:
-        if s not in selected:
-            wc = len(s.split())
-            if current_words + wc <= target_length + 10:
-                selected.append(s)
-                current_words += wc
+    current_words = 0
+    selected_sentences = []
+    for sentence in key_details:
+        word_count = len(sentence.split())
+        if current_words + word_count <= target_length + 5:
+            selected_sentences.append(sentence)
+            current_words += word_count
 
-    summary = ' '.join(selected)
-    if len(summary.split()) > target_length:
-        words = summary.split()
-        summary = ' '.join(words[:target_length])
-        last_dot = summary.rfind('.')
-        if last_dot != -1:
-            summary = summary[:last_dot + 1]
-    elif len(summary.split()) < target_length * 0.9:
-        summary = ' '.join(sentences)  # Fallback to full summary
+    for sentence in sentences:
+        if sentence not in selected_sentences:
+            word_count = len(sentence.split())
+            if current_words + word_count <= target_length + 5:
+                selected_sentences.append(sentence)
+                current_words += word_count
 
-    # Polish text
-    summary = re.sub(r'\s+', ' ', summary).strip()
-    summary = re.sub(r'\bolympics\b', 'the Olympics', summary, flags=re.IGNORECASE)
-    summary = re.sub(r'\bt tournaments\b', 'T20 tournaments', summary, flags=re.IGNORECASE)
-    return summary[0].upper() + summary[1:] if summary else ""
+    final_summary = ' '.join(selected_sentences)
 
-# Generate summary using BART
-@st.cache_data
-def summarize_text(text, max_length, _tokenizer, _model):
+    if len(final_summary.split()) > target_length:
+        words = final_summary.split()
+        final_summary = ' '.join(words[:target_length])
+        last_period = final_summary.rfind('.')
+        if last_period != -1:
+            final_summary = final_summary[:last_period + 1]
+
+    final_summary = re.sub(r'\s+', ' ', final_summary).strip()
+    if final_summary:
+        final_summary = final_summary[0].upper() + final_summary[1:]
+    return final_summary if final_summary else sentences[0][:target_length]
+
+# Function to generate summary using BART with progress simulation
+def summarize_text(text, max_length, progress_bar, status_text):
     try:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # Tokenize input
-        status_text.text("Tokenizing input...")
-        inputs = _tokenizer(text, max_length=256, return_tensors="pt", truncation=True)
-        if torch.cuda.is_available():
-            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        model_name = "facebook/bart-large-cnn"
+        tokenizer = BartTokenizer.from_pretrained(model_name)
+        model = BartForConditionalGeneration.from_pretrained(model_name)
+
+        status_text.text("Generating summary: Tokenizing input...")
+        inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
         progress_bar.progress(70)
 
-        # Generate summary
-        status_text.text("Processing with BART...")
-        with torch.no_grad():
-            summary_ids = _model.generate(
-                inputs['input_ids'],
-                max_length=max_length + 20,
-                min_length=max(30, max_length // 2),
-                length_penalty=0.7,
-                num_beams=4,
-                early_stopping=True
-            )
-        progress_bar.progress(95)
-        
-        # Decode and post-process
-        status_text.text("Finalizing output...")
-        summary = _tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+        status_text.text("Generating summary: Processing with BART...")
+        for i in range(70, 95, 5):
+            time.sleep(0.5)
+            progress_bar.progress(i)
+
+        summary_ids = model.generate(
+            inputs['input_ids'],
+            max_length=max_length + 20,
+            min_length=max(30, max_length // 2),
+            length_penalty=0.7,
+            num_beams=10,
+            early_stopping=True
+        )
+
+        status_text.text("Generating summary: Finalizing output...")
+        summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
         summary = post_process_summary(summary, max_length)
         progress_bar.progress(100)
         status_text.text("Summarization complete!")
         return summary
     except Exception as e:
         return f"Error during summarization: {str(e)}"
-    finally:
-        progress_bar.empty()
-        status_text.empty()
 
-# Streamlit App
+# Streamlit app interface
 def main():
-    st.title("📰 News Article Summarizer")
-    st.write("Enter a news article URL and get a clear, concise summary.")
-    st.info("Streamlit Cloud allocates 2.7 GB per app. For faster performance, use a GPU-enabled environment.")
+    st.title("News Article Summarizer")
+    st.write("Enter a news article URL and select your desired summary length for a clear, concise summary.")
 
     with st.container():
         col1, col2 = st.columns([3, 1])
         with col1:
-            url = st.text_input("Article URL", placeholder="https://example.com/news")
+            url = st.text_input("Article URL", placeholder="https://example.com/news-article", key="url_input")
         with col2:
-            summary_length = st.slider("Summary Length (words)", 50, 300, 150, 10)
+            summary_length = st.slider("Summary Length (words)", min_value=50, max_value=300, value=150, step=10)
 
-    if st.button("Summarize"):
+    if st.button("Summarize", key="summarize_button"):
         if not url:
             st.error("Please enter a valid URL.")
         else:
-            progress = st.progress(0)
-            status = st.empty()
+            progress_bar = st.progress(0)
+            status_text = st.empty()
 
-            status.text("Extracting article...")
-            article = extract_article_text(url)
-            progress.progress(33)
+            status_text.text("Extracting article content...")
+            article_text = extract_article_text(url)
+            progress_bar.progress(33)
 
-            if "Error" in article:
-                st.error(article)
-                progress.empty()
-                status.empty()
-                return
-
-            status.text("Preprocessing text...")
-            cleaned = preprocess_text(article)
-            progress.progress(66)
-
-            summary = summarize_text(cleaned, summary_length, tokenizer, model)
-            
-            if "Error" in summary:
-                st.error(summary)
+            if "Error" in article_text:
+                st.error(article_text)
+                progress_bar.empty()
+                status_text.empty()
             else:
-                st.subheader(f"📝 Summary ({summary_length} words):")
-                st.write(summary)
-                st.success("Summarization Complete ✅")
-            progress.empty()
-            status.empty()
+                status_text.text("Preprocessing text for summarization...")
+                cleaned_text = preprocess_text(article_text)
+                progress_bar.progress(66)
 
+                summary = summarize_text(cleaned_text, summary_length, progress_bar, status_text)
+
+                if "Error" in summary:
+                    st.error(summary)
+                else:
+                    st.subheader(f"Summary ({summary_length} words)")
+                    st.write(summary)
+                    st.success("Summarization complete!")
+                progress_bar.empty()
+                status_text.empty()
+
+# Run the app
 if __name__ == "__main__":
     main()
