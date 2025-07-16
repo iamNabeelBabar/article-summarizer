@@ -1,7 +1,20 @@
-streamlit==1.27.2
-requests==2.31.0
-beautifulsoup4==4.12.2
+# ✅ Core web interface
+streamlit==1.39.0
+
+# ✅ HTTP requests
+requests==2.32.3
+
+# ✅ HTML parsing
+beautifulsoup4==4.12.3
+
+# ✅ Text processing & tokenization
 nltk==3.8.1
-transformers==4.36.2
-torch==2.0.1
-sentencepiece==0.1.99
+
+# ✅ Transformers library for summarization (BART)
+transformers==4.44.2
+
+# ✅ PyTorch (ensure compatibility with runtime Python version)
+torch==2.4.1
+
+# ✅ For tokenizer support in transformers
+sentencepiece==0.2.0
